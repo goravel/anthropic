@@ -17,10 +17,7 @@ jobs:
           go-version: ${{ matrix.go }}
       - name: Install dependencies
         run: go mod tidy
-      - name: Run unit tests
-        run: go test -timeout 10m ./...
-      - name: Run live smoke test
-        if: github.event_name == 'push'
+      - name: Run tests
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: go test -timeout 10m -run '^TestProviderPromptIntegration$' -v ./...
+        run: go test -timeout 10m ./...

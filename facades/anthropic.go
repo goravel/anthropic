@@ -20,10 +20,5 @@ func Anthropic(provider string) (contractsai.Provider, error) {
 		return nil, err
 	}
 
-	resolvedProvider, ok := instance.(contractsai.Provider)
-	if !ok {
-		return nil, fmt.Errorf("anthropic binding returned %T, expected ai.Provider", instance)
-	}
-
-	return resolvedProvider, nil
+	return instance.(contractsai.Provider), nil
 }
