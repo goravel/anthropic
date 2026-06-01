@@ -461,7 +461,7 @@ func parseMultipartFile(t *testing.T, contentType string, raw []byte) (string, s
 	reader := multipart.NewReader(strings.NewReader(string(raw)), params["boundary"])
 	part, err := reader.NextPart()
 	require.NoError(t, err)
-	defer part.Close()
+	defer func() { require.NoError(t, part.Close()) }()
 	body, err := io.ReadAll(part)
 	require.NoError(t, err)
 	return part.FileName(), part.Header.Get("Content-Type"), body
