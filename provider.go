@@ -46,6 +46,9 @@ func NewAnthropic(config contractsconfig.Config, provider string) (*Provider, er
 	if providerConfig.Models.Text.Default == "" {
 		providerConfig.Models.Text.Default = DefaultTextModel
 	}
+	if providerConfig.Models.Text.MaxTokens == 0 {
+		providerConfig.Models.Text.MaxTokens = defaultMaxTokens
+	}
 
 	return &Provider{client: goanthropic.NewClient(opts...), config: providerConfig}, nil
 }
@@ -206,7 +209,7 @@ func (r *Provider) buildRequest(ctx context.Context, prompt contractsai.AgentPro
 	}
 
 	params := goanthropic.MessageNewParams{
-		MaxTokens: defaultMaxTokens,
+		MaxTokens: int64(r.config.Models.Text.MaxTokens),
 		Messages:  messages,
 		Model:     goanthropic.Model(r.resolveModel(prompt.Model)),
 	}

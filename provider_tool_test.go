@@ -33,6 +33,7 @@ func TestProviderPromptWithTools(t *testing.T) {
 		config: contractsai.ProviderConfig{},
 	}
 	provider.config.Models.Text.Default = "claude-default"
+	provider.config.Models.Text.MaxTokens = defaultMaxTokens
 
 	response, err := provider.Prompt(context.Background(), contractsai.AgentPrompt{
 		Agent: mockAgent,
@@ -68,6 +69,7 @@ func TestProviderPromptBuildsToolHistory(t *testing.T) {
 		config: contractsai.ProviderConfig{},
 	}
 	provider.config.Models.Text.Default = "claude-default"
+	provider.config.Models.Text.MaxTokens = defaultMaxTokens
 
 	_, err := provider.Prompt(context.Background(), contractsai.AgentPrompt{Agent: mockAgent, Input: "Thanks"})
 	require.NoError(t, err)
@@ -113,6 +115,7 @@ func TestProviderStreamPreservesToolArgsFromStartEvent(t *testing.T) {
 		config: contractsai.ProviderConfig{},
 	}
 	provider.config.Models.Text.Default = "claude-default"
+	provider.config.Models.Text.MaxTokens = defaultMaxTokens
 
 	stream, err := provider.Stream(context.Background(), contractsai.AgentPrompt{Agent: mockAgent, Input: "Use a tool"})
 	require.NoError(t, err)

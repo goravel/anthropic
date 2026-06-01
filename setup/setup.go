@@ -21,6 +21,7 @@ func main() {
 		"models": map[string]any{
 			"text": map[string]any{
 				"default": "",
+				"max_tokens": 4096,
 			},
 		},
 		"url": config.Env("ANTHROPIC_API_URL", ""),

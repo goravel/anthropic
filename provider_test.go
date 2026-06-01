@@ -106,6 +106,25 @@ func TestNewAnthropic(t *testing.T) {
 			expectConfig: func() *contractsai.ProviderConfig {
 				cfg := contractsai.ProviderConfig{Key: "test-key", Url: "http://localhost:1234"}
 				cfg.Models.Text.Default = DefaultTextModel
+				cfg.Models.Text.MaxTokens = defaultMaxTokens
+				return &cfg
+			}(),
+		},
+		{
+			name: "preserves configured text max tokens",
+			setup: func() {
+				mockConfig.EXPECT().UnmarshalKey("ai.providers.anthropic", new(contractsai.ProviderConfig)).RunAndReturn(func(_ string, rawVal any) error {
+					cfg := rawVal.(*contractsai.ProviderConfig)
+					cfg.Key = "test-key"
+					cfg.Models.Text.Default = "claude-custom"
+					cfg.Models.Text.MaxTokens = 8192
+					return nil
+				}).Once()
+			},
+			expectConfig: func() *contractsai.ProviderConfig {
+				cfg := contractsai.ProviderConfig{Key: "test-key"}
+				cfg.Models.Text.Default = "claude-custom"
+				cfg.Models.Text.MaxTokens = 8192
 				return &cfg
 			}(),
 		},
@@ -158,7 +177,7 @@ func TestProviderPrompt(t *testing.T) {
 			expectText: "assistant reply",
 			assertBody: func(t *testing.T, body map[string]any) {
 				assert.Equal(t, "claude-default", body["model"])
-				assert.Equal(t, float64(4096), body["max_tokens"])
+				assert.Equal(t, float64(2048), body["max_tokens"])
 				assert.Equal(t, []any{map[string]any{"text": "system rule", "type": "text"}}, body["system"])
 				messages := body["messages"].([]any)
 				require.Len(t, messages, 3)
@@ -213,6 +232,7 @@ func TestProviderPrompt(t *testing.T) {
 				config: contractsai.ProviderConfig{},
 			}
 			provider.config.Models.Text.Default = "claude-default"
+			provider.config.Models.Text.MaxTokens = 2048
 
 			response, err := provider.Prompt(context.Background(), contractsai.AgentPrompt{Agent: mockAgent, Input: tt.input, Attachments: tt.attachments, Tools: tt.tools})
 			require.NoError(t, err)

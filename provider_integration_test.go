@@ -24,6 +24,7 @@ func TestProviderPromptIntegration(t *testing.T) {
 	mockConfig.EXPECT().UnmarshalKey("ai.providers.anthropic", new(contractsai.ProviderConfig)).RunAndReturn(func(_ string, rawVal any) error {
 		cfg := rawVal.(*contractsai.ProviderConfig)
 		cfg.Key = apiKey
+		cfg.Models.Text.MaxTokens = defaultMaxTokens
 		return nil
 	}).Once()
 
