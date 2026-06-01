@@ -19,7 +19,10 @@ import (
 	"github.com/goravel/framework/errors"
 )
 
-const DefaultTextModel = "claude-sonnet-4-5"
+const (
+	DefaultTextModel = "claude-sonnet-4-5"
+	defaultMaxTokens = 4096
+)
 
 type Provider struct {
 	client goanthropic.Client
@@ -115,8 +118,8 @@ func (r *Provider) Stream(ctx context.Context, prompt contractsai.AgentPrompt) (
 					continue
 				}
 				if builder, ok := toolInputBuffer[chunk.Index]; ok {
-					call.RawArgs = strings.TrimSpace(builder.String())
-					if call.RawArgs != "" {
+					if rawArgs := strings.TrimSpace(builder.String()); rawArgs != "" {
+						call.RawArgs = rawArgs
 						_ = json.Unmarshal([]byte(call.RawArgs), &call.Args)
 					}
 				}
@@ -203,7 +206,7 @@ func (r *Provider) buildRequest(ctx context.Context, prompt contractsai.AgentPro
 	}
 
 	params := goanthropic.MessageNewParams{
-		MaxTokens: 4096,
+		MaxTokens: defaultMaxTokens,
 		Messages:  messages,
 		Model:     goanthropic.Model(r.resolveModel(prompt.Model)),
 	}

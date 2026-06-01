@@ -6,7 +6,7 @@ The Anthropic provider for `facades.AI()` of Goravel.
 
 | goravel/anthropic | goravel/framework |
 |-------------------|-------------------|
-| v1.17.x           | v1.17.x           |
+| v1.18.x           | v1.18.x           |
 
 ## Install
 

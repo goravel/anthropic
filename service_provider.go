@@ -1,6 +1,8 @@
 package anthropic
 
 import (
+	"fmt"
+
 	"github.com/goravel/framework/contracts/ai"
 	"github.com/goravel/framework/contracts/binding"
 	"github.com/goravel/framework/contracts/foundation"
@@ -39,7 +41,12 @@ func (r *ServiceProvider) Register(app foundation.Application) {
 			return nil, errors.ConfigFacadeNotSet.SetModule(Name)
 		}
 
-		provider, err := NewAnthropic(config, parameters["provider"].(string))
+		providerName, ok := parameters["provider"].(string)
+		if !ok || providerName == "" {
+			return nil, fmt.Errorf("missing anthropic provider parameter")
+		}
+
+		provider, err := NewAnthropic(config, providerName)
 		if err != nil {
 			return nil, err
 		}

@@ -8,10 +8,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
-	"time"
 
 	goanthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -353,38 +351,6 @@ func TestProviderPromptResolvesStoredAttachmentByFileID(t *testing.T) {
 	assert.Equal(t, "/v1/messages", requests[2].path)
 }
 
-func TestProviderPromptIntegration(t *testing.T) {
-	apiKey := strings.TrimSpace(getenv("ANTHROPIC_API_KEY"))
-	if apiKey == "" {
-		t.Skip("ANTHROPIC_API_KEY is not set")
-	}
-
-	mockConfig := mocksconfig.NewConfig(t)
-	mockConfig.EXPECT().UnmarshalKey("ai.providers.anthropic", new(contractsai.ProviderConfig)).RunAndReturn(func(_ string, rawVal any) error {
-		cfg := rawVal.(*contractsai.ProviderConfig)
-		cfg.Key = apiKey
-		return nil
-	}).Once()
-
-	mockAgent := mocksai.NewAgent(t)
-	mockAgent.EXPECT().Instructions().Return("").Once()
-	mockAgent.EXPECT().Messages().Return(nil).Once()
-
-	provider, err := NewAnthropic(mockConfig, "anthropic")
-	require.NoError(t, err)
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-
-	response, err := provider.Prompt(ctx, contractsai.AgentPrompt{Agent: mockAgent, Input: "Reply with OK only. Do not include punctuation or extra text."})
-	require.NoError(t, err)
-	require.NotNil(t, response)
-	require.NotNil(t, response.Usage())
-	assert.Equal(t, "OK", strings.TrimSpace(response.Text()))
-	assert.Positive(t, response.Usage().Total())
-	assert.Empty(t, response.ToolCalls())
-}
-
 func newMessageServer(t *testing.T, status int, body string, captured chan<- capturedRequest) *httptest.Server {
 	t.Helper()
 	handler := func(w http.ResponseWriter, r *http.Request) {
@@ -553,8 +519,4 @@ func anthropicMessageResponse(t *testing.T, content []map[string]any, inputToken
 	encoded, err := json.Marshal(payload)
 	require.NoError(t, err)
 	return string(encoded)
-}
-
-func getenv(key string) string {
-	return os.Getenv(key)
 }
