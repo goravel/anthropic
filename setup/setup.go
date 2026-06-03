@@ -16,6 +16,10 @@ func main() {
 	serviceProvider := "&anthropic.ServiceProvider{}"
 	aiProviderContract := "github.com/goravel/framework/contracts/ai"
 	anthropicFacadesImport := moduleImport + "/facades"
+	env := `
+ANTHROPIC_API_KEY=
+ANTHROPIC_BASE_URL=
+`
 	provider := `map[string]any{
 		"key": config.Env("ANTHROPIC_API_KEY", ""),
 		"models": map[string]any{
@@ -24,7 +28,7 @@ func main() {
 				"max_tokens": 4096,
 			},
 		},
-		"url": config.Env("ANTHROPIC_API_URL", ""),
+		"url": config.Env("ANTHROPIC_BASE_URL", ""),
 		"via": func() (ai.Provider, error) {
 			return anthropicfacades.Anthropic("anthropic")
 		},
@@ -38,6 +42,9 @@ func main() {
 			modify.AddImport(aiProviderContract),
 			modify.AddImport(anthropicFacadesImport, "anthropicfacades"),
 		).Find(aiProvidersConfig).Modify(modify.AddConfig("anthropic", provider)),
+
+		modify.WhenFileExists(path.Base(".env"), modify.WhenFileNotContains(path.Base(".env"), "ANTHROPIC_API_KEY", modify.File(path.Base(".env")).Append(env))),
+		modify.WhenFileExists(path.Base(".env.example"), modify.WhenFileNotContains(path.Base(".env.example"), "ANTHROPIC_API_KEY", modify.File(path.Base(".env.example")).Append(env))),
 	).Uninstall(
 		modify.WhenFileExists(aiConfigPath, modify.GoFile(aiConfigPath).
 			Find(aiProvidersConfig).Modify(modify.RemoveConfig("anthropic")).
