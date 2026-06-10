@@ -20,6 +20,33 @@ This registers the service provider and updates `config/ai.go` so `ai.providers.
 
 Or check [the setup file](./setup/setup.go) to install the package manually.
 
+## Custom Failover
+
+The provider marks these Anthropic API errors as failoverable by default:
+
+| Error | Reason |
+|-------|--------|
+| `rate_limit_error` or `429 Too Many Requests` | `rate_limited` |
+| `billing_error` or `402 Payment Required` | `insufficient_credits` |
+| `overloaded_error`, `503 Service Unavailable`, or `529 Overloaded` | `provider_overloaded` |
+
+Configure `failover` rules to add Anthropic-specific error message mappings. Plain strings use substring matching, and slash-delimited strings use Go regular expressions.
+
+```go
+"anthropic": map[string]any{
+	"key": config.Env("ANTHROPIC_API_KEY", ""),
+	"failover": map[string][]string{
+		"context_length_exceeded": {
+			"maximum context length",
+			"/(?i)context.*length/",
+		},
+	},
+	"via": func() (ai.Provider, error) {
+		return anthropicfacades.Anthropic("anthropic")
+	},
+}
+```
+
 ## Supported capabilities
 
 - Text prompting

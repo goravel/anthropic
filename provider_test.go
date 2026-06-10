@@ -18,6 +18,7 @@ import (
 
 	frameworkai "github.com/goravel/framework/ai"
 	contractsai "github.com/goravel/framework/contracts/ai"
+	"github.com/goravel/framework/errors"
 	mocksai "github.com/goravel/framework/mocks/ai"
 	mocksconfig "github.com/goravel/framework/mocks/config"
 )
@@ -71,6 +72,12 @@ func (t *staticTool) Description() string        { return t.description }
 func (t *staticTool) Parameters() map[string]any { return t.params }
 func (t *staticTool) Execute(_ context.Context, _ map[string]any) (string, error) {
 	return "tool result", nil
+}
+
+type providerTestError string
+
+func (e providerTestError) Error() string {
+	return string(e)
 }
 
 func TestNewAnthropic(t *testing.T) {
@@ -144,8 +151,109 @@ func TestNewAnthropic(t *testing.T) {
 			}
 			require.NotNil(t, provider)
 			assert.Equal(t, *tt.expectConfig, provider.config)
+			assert.Equal(t, "anthropic", provider.name)
 		})
 	}
+}
+
+func TestNewAnthropicFailoverRules(t *testing.T) {
+	t.Run("compiles configured failover rules", func(t *testing.T) {
+		mockConfig := mocksconfig.NewConfig(t)
+		mockConfig.EXPECT().UnmarshalKey("ai.providers.anthropic", new(contractsai.ProviderConfig)).RunAndReturn(func(_ string, rawVal any) error {
+			cfg := rawVal.(*contractsai.ProviderConfig)
+			cfg.Key = "test-key"
+			cfg.Failover = map[contractsai.FailoverReason][]string{
+				"context_length_exceeded": {"context length"},
+			}
+			return nil
+		}).Once()
+
+		provider, err := NewAnthropic(mockConfig, "anthropic")
+
+		require.NoError(t, err)
+		require.NotNil(t, provider)
+		require.NotNil(t, provider.failoverRules)
+		reason, ok := provider.failoverRules.Match(providerTestError("maximum context length exceeded"))
+		assert.True(t, ok)
+		assert.Equal(t, contractsai.FailoverReason("context_length_exceeded"), reason)
+	})
+
+	t.Run("returns invalid regex errors", func(t *testing.T) {
+		mockConfig := mocksconfig.NewConfig(t)
+		mockConfig.EXPECT().UnmarshalKey("ai.providers.anthropic", new(contractsai.ProviderConfig)).RunAndReturn(func(_ string, rawVal any) error {
+			cfg := rawVal.(*contractsai.ProviderConfig)
+			cfg.Failover = map[contractsai.FailoverReason][]string{
+				"bad_pattern": {"/[/"},
+			}
+			return nil
+		}).Once()
+
+		provider, err := NewAnthropic(mockConfig, "anthropic")
+
+		assert.Nil(t, provider)
+		assert.ErrorIs(t, err, errors.AIFailoverPatternInvalid)
+	})
+}
+
+func TestProviderFailoverError(t *testing.T) {
+	provider := &Provider{name: "anthropic-primary"}
+
+	defaultCases := []struct {
+		name       string
+		statusCode int
+		reason     contractsai.FailoverReason
+	}{
+		{
+			name:       "rate limited",
+			statusCode: http.StatusTooManyRequests,
+			reason:     defaultFailoverReasonRateLimited,
+		},
+		{
+			name:       "insufficient credits",
+			statusCode: http.StatusPaymentRequired,
+			reason:     defaultFailoverReasonInsufficientCredits,
+		},
+		{
+			name:       "service unavailable",
+			statusCode: http.StatusServiceUnavailable,
+			reason:     defaultFailoverReasonProviderOverloaded,
+		},
+		{
+			name:       "overloaded",
+			statusCode: anthropicStatusOverloaded,
+			reason:     defaultFailoverReasonProviderOverloaded,
+		},
+	}
+
+	for _, tt := range defaultCases {
+		t.Run(tt.name, func(t *testing.T) {
+			anthropicErr := &goanthropic.Error{StatusCode: tt.statusCode}
+			err := provider.failoverError(anthropicErr)
+
+			var failoverErr contractsai.FailoverError
+			require.ErrorAs(t, err, &failoverErr)
+			assert.Equal(t, tt.reason, failoverErr.Reason())
+			assert.Equal(t, "anthropic-primary", failoverErr.Provider())
+			assert.ErrorIs(t, err, anthropicErr)
+		})
+	}
+
+	nonFailoverErr := &goanthropic.Error{StatusCode: http.StatusBadRequest}
+	assert.Same(t, nonFailoverErr, provider.failoverError(nonFailoverErr))
+	assert.Equal(t, assert.AnError, provider.failoverError(assert.AnError))
+
+	customErr := providerTestError("maximum context length exceeded")
+	rules, err := frameworkai.NewFailoverRules("anthropic-primary", map[contractsai.FailoverReason][]string{
+		"context_length_exceeded": {"context length"},
+	})
+	require.NoError(t, err)
+	provider = &Provider{name: "anthropic-primary", failoverRules: &rules}
+	err = provider.failoverError(customErr)
+	var failoverErr contractsai.FailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	assert.Equal(t, contractsai.FailoverReason("context_length_exceeded"), failoverErr.Reason())
+	assert.Equal(t, "anthropic-primary", failoverErr.Provider())
+	assert.ErrorIs(t, err, customErr)
 }
 
 func TestProviderPrompt(t *testing.T) {
@@ -247,6 +355,34 @@ func TestProviderPrompt(t *testing.T) {
 			tt.assertBody(t, req.body)
 		})
 	}
+}
+
+func TestProviderPromptFailoverError(t *testing.T) {
+	mockAgent := mocksai.NewAgent(t)
+	mockAgent.EXPECT().Instructions().Return("").Once()
+	mockAgent.EXPECT().Messages().Return(nil).Once()
+
+	captured := make(chan capturedRequest, 1)
+	server := newMessageServer(t, http.StatusTooManyRequests, `{"type":"error","error":{"type":"rate_limit_error","message":"rate limited"}}`, captured)
+	defer server.Close()
+
+	provider := &Provider{
+		client: goanthropic.NewClient(option.WithoutEnvironmentDefaults(), option.WithBaseURL(server.URL), option.WithAPIKey("test-key"), option.WithMaxRetries(0)),
+		config: contractsai.ProviderConfig{},
+	}
+	provider.config.Models.Text.Default = "claude-default"
+	provider.config.Models.Text.MaxTokens = 2048
+
+	response, err := provider.Prompt(context.Background(), contractsai.AgentPrompt{Agent: mockAgent, Input: "hello"})
+
+	assert.Nil(t, response)
+	var failoverErr contractsai.FailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	assert.Equal(t, defaultFailoverReasonRateLimited, failoverErr.Reason())
+	assert.Equal(t, "anthropic", failoverErr.Provider())
+	var anthropicErr *goanthropic.Error
+	require.ErrorAs(t, err, &anthropicErr)
+	assert.Equal(t, http.StatusTooManyRequests, anthropicErr.StatusCode)
 }
 
 func TestProviderStream(t *testing.T) {
