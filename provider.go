@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"mime"
+	"net/http"
 	"path/filepath"
 	"strings"
 
@@ -24,14 +26,28 @@ const (
 	defaultMaxTokens = 4096
 )
 
+const (
+	defaultFailoverReasonRateLimited         contractsai.FailoverReason = "rate_limited"
+	defaultFailoverReasonInsufficientCredits contractsai.FailoverReason = "insufficient_credits"
+	defaultFailoverReasonProviderOverloaded  contractsai.FailoverReason = "provider_overloaded"
+	anthropicStatusOverloaded                                           = 529
+)
+
 type Provider struct {
-	client goanthropic.Client
-	config contractsai.ProviderConfig
+	client        goanthropic.Client
+	config        contractsai.ProviderConfig
+	failoverRules *frameworkai.FailoverRules
+	name          string
 }
 
 func NewAnthropic(config contractsconfig.Config, provider string) (*Provider, error) {
 	var providerConfig contractsai.ProviderConfig
 	err := config.UnmarshalKey("ai.providers."+provider, &providerConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	failoverRules, err := newFailoverRules(provider, providerConfig.Failover)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +66,12 @@ func NewAnthropic(config contractsconfig.Config, provider string) (*Provider, er
 		providerConfig.Models.Text.MaxTokens = defaultMaxTokens
 	}
 
-	return &Provider{client: goanthropic.NewClient(opts...), config: providerConfig}, nil
+	return &Provider{
+		client:        goanthropic.NewClient(opts...),
+		config:        providerConfig,
+		failoverRules: failoverRules,
+		name:          provider,
+	}, nil
 }
 
 func (r *Provider) Prompt(ctx context.Context, prompt contractsai.AgentPrompt) (contractsai.AgentResponse, error) {
@@ -61,7 +82,7 @@ func (r *Provider) Prompt(ctx context.Context, prompt contractsai.AgentPrompt) (
 
 	message, err := r.client.Messages.New(ctx, params)
 	if err != nil {
-		return nil, err
+		return nil, r.failoverError(err)
 	}
 
 	text, toolCalls := r.parseMessageContent(message.Content)
@@ -141,7 +162,7 @@ func (r *Provider) Stream(ctx context.Context, prompt contractsai.AgentPrompt) (
 				}
 			}
 
-			return nil, err
+			return nil, r.failoverError(err)
 		}
 
 		if len(finalToolCalls) == 0 {
@@ -166,7 +187,7 @@ func (r *Provider) PutFile(ctx context.Context, file contractsai.StorableFile) (
 		File: goanthropic.File(bytes.NewReader(content), r.uploadFilename(file), file.MimeType()),
 	})
 	if err != nil {
-		return nil, err
+		return nil, r.failoverError(err)
 	}
 
 	return frameworkai.NewFileResponse(upload.ID, "", nil), nil
@@ -175,12 +196,12 @@ func (r *Provider) PutFile(ctx context.Context, file contractsai.StorableFile) (
 func (r *Provider) GetFile(ctx context.Context, id string) (contractsai.FileResponse, error) {
 	metadata, err := r.client.Beta.Files.GetMetadata(ctx, id, goanthropic.BetaFileGetMetadataParams{})
 	if err != nil {
-		return nil, err
+		return nil, r.failoverError(err)
 	}
 
 	response, err := r.client.Beta.Files.Download(ctx, id, goanthropic.BetaFileDownloadParams{})
 	if err != nil {
-		return nil, err
+		return nil, r.failoverError(err)
 	}
 	defer errors.Ignore(response.Body.Close)
 
@@ -199,7 +220,76 @@ func (r *Provider) GetFile(ctx context.Context, id string) (contractsai.FileResp
 
 func (r *Provider) DeleteFile(ctx context.Context, id string) error {
 	_, err := r.client.Beta.Files.Delete(ctx, id, goanthropic.BetaFileDeleteParams{})
-	return err
+	if err != nil {
+		return r.failoverError(err)
+	}
+
+	return nil
+}
+
+func (r *Provider) failoverError(err error) error {
+	var anthropicErr *goanthropic.Error
+	if stderrors.As(err, &anthropicErr) {
+		switch anthropicErr.Type() {
+		case goanthropic.ErrorTypeRateLimitError:
+			return frameworkai.NewFailoverError(r.providerName(), defaultFailoverReasonRateLimited, err)
+		case goanthropic.ErrorTypeBillingError:
+			return frameworkai.NewFailoverError(r.providerName(), defaultFailoverReasonInsufficientCredits, err)
+		case goanthropic.ErrorTypeOverloadedError:
+			return frameworkai.NewFailoverError(r.providerName(), defaultFailoverReasonProviderOverloaded, err)
+		}
+
+		switch anthropicErr.StatusCode {
+		case http.StatusTooManyRequests:
+			return frameworkai.NewFailoverError(r.providerName(), defaultFailoverReasonRateLimited, err)
+		case http.StatusPaymentRequired:
+			return frameworkai.NewFailoverError(r.providerName(), defaultFailoverReasonInsufficientCredits, err)
+		case http.StatusServiceUnavailable, anthropicStatusOverloaded:
+			return frameworkai.NewFailoverError(r.providerName(), defaultFailoverReasonProviderOverloaded, err)
+		}
+	}
+
+	if r.failoverRules == nil {
+		return err
+	}
+
+	return r.failoverRules.Wrap(r.providerName(), err)
+}
+
+func (r *Provider) providerName() string {
+	if r.name != "" {
+		return r.name
+	}
+
+	return "anthropic"
+}
+
+func newFailoverRules(provider string, patterns map[contractsai.FailoverReason][]string) (*frameworkai.FailoverRules, error) {
+	if !hasFailoverPatterns(patterns) {
+		return nil, nil
+	}
+
+	rules, err := frameworkai.NewFailoverRules(provider, patterns)
+	if err != nil {
+		return nil, err
+	}
+
+	return &rules, nil
+}
+
+func hasFailoverPatterns(patterns map[contractsai.FailoverReason][]string) bool {
+	for reason, reasonPatterns := range patterns {
+		if reason == "" {
+			continue
+		}
+		for _, pattern := range reasonPatterns {
+			if pattern != "" {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func (r *Provider) buildRequest(ctx context.Context, prompt contractsai.AgentPrompt) (goanthropic.MessageNewParams, error) {

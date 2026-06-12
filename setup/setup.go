@@ -28,6 +28,7 @@ ANTHROPIC_BASE_URL=
 				"max_tokens": 4096,
 			},
 		},
+		"failover": map[string][]string{},
 		"url": config.Env("ANTHROPIC_BASE_URL", ""),
 		"via": func() (ai.Provider, error) {
 			return anthropicfacades.Anthropic("anthropic")
