@@ -195,10 +195,10 @@ func TestNewAnthropicFailoverRules(t *testing.T) {
 	})
 }
 
-func TestProviderFailoverError(t *testing.T) {
+func TestProviderFailoverErrorDefaultRules(t *testing.T) {
 	provider := &Provider{name: "anthropic-primary"}
 
-	defaultCases := []struct {
+	tests := []struct {
 		name       string
 		statusCode int
 		reason     contractsai.FailoverReason
@@ -225,7 +225,7 @@ func TestProviderFailoverError(t *testing.T) {
 		},
 	}
 
-	for _, tt := range defaultCases {
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			anthropicErr := &goanthropic.Error{StatusCode: tt.statusCode}
 			err := provider.failoverError(anthropicErr)
@@ -237,18 +237,25 @@ func TestProviderFailoverError(t *testing.T) {
 			assert.ErrorIs(t, err, anthropicErr)
 		})
 	}
+}
 
+func TestProviderFailoverErrorReturnsOriginalError(t *testing.T) {
+	provider := &Provider{name: "anthropic-primary"}
 	nonFailoverErr := &goanthropic.Error{StatusCode: http.StatusBadRequest}
+
 	assert.Same(t, nonFailoverErr, provider.failoverError(nonFailoverErr))
 	assert.Equal(t, assert.AnError, provider.failoverError(assert.AnError))
+}
 
+func TestProviderFailoverErrorCustomRules(t *testing.T) {
 	customErr := providerTestError("maximum context length exceeded")
 	rules, err := frameworkai.NewFailoverRules("anthropic-primary", map[contractsai.FailoverReason][]string{
 		"context_length_exceeded": {"context length"},
 	})
 	require.NoError(t, err)
-	provider = &Provider{name: "anthropic-primary", failoverRules: &rules}
+	provider := &Provider{name: "anthropic-primary", failoverRules: &rules}
 	err = provider.failoverError(customErr)
+
 	var failoverErr contractsai.FailoverError
 	require.ErrorAs(t, err, &failoverErr)
 	assert.Equal(t, contractsai.FailoverReason("context_length_exceeded"), failoverErr.Reason())
