@@ -482,6 +482,8 @@ func TestProviderFileLifecycle(t *testing.T) {
 		assert.Equal(t, "/v1/files/file_123/content", requests[1].path)
 		assert.Empty(t, requests[0].rawQuery)
 		assert.Empty(t, requests[0].beta)
+		assert.Empty(t, requests[1].rawQuery)
+		assert.Empty(t, requests[1].beta)
 	})
 
 	t.Run("delete file uses files api", func(t *testing.T) {
@@ -530,7 +532,7 @@ func newMessageServer(t *testing.T, status int, body string, captured chan<- cap
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		defer func() { _ = r.Body.Close() }()
 		payload, raw := decodeBodyMap(t, r)
-		captured <- capturedRequest{path: r.URL.Path, apiKey: r.Header.Get("X-Api-Key"), version: r.Header.Get("anthropic-version"), body: payload, contentType: r.Header.Get("Content-Type"), rawBody: raw}
+		captured <- capturedRequest{path: r.URL.Path, rawQuery: r.URL.RawQuery, apiKey: r.Header.Get("X-Api-Key"), version: r.Header.Get("anthropic-version"), body: payload, contentType: r.Header.Get("Content-Type"), rawBody: raw}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
@@ -543,7 +545,7 @@ func newStreamingMessageServer(t *testing.T, body string, captured chan<- captur
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		defer func() { _ = r.Body.Close() }()
 		payload, raw := decodeBodyMap(t, r)
-		captured <- capturedRequest{path: r.URL.Path, apiKey: r.Header.Get("X-Api-Key"), version: r.Header.Get("anthropic-version"), body: payload, contentType: r.Header.Get("Content-Type"), rawBody: raw}
+		captured <- capturedRequest{path: r.URL.Path, rawQuery: r.URL.RawQuery, apiKey: r.Header.Get("X-Api-Key"), version: r.Header.Get("anthropic-version"), body: payload, contentType: r.Header.Get("Content-Type"), rawBody: raw}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(body))
@@ -599,16 +601,16 @@ func newStoredAttachmentServer(t *testing.T, captured chan<- capturedRequest) *h
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/files/file_123":
-			captured <- capturedRequest{path: r.URL.Path}
+			captured <- capturedRequest{path: r.URL.Path, rawQuery: r.URL.RawQuery}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":"file_123","created_at":"2026-01-01T00:00:00Z","filename":"report.txt","mime_type":"text/plain","size_bytes":6,"type":"file","downloadable":true,"scope":null}`))
 		case "/v1/files/file_123/content":
-			captured <- capturedRequest{path: r.URL.Path}
+			captured <- capturedRequest{path: r.URL.Path, rawQuery: r.URL.RawQuery}
 			w.Header().Set("Content-Type", "application/binary")
 			_, _ = w.Write([]byte("report"))
 		case "/v1/messages":
 			payload, raw := decodeBodyMap(t, r)
-			captured <- capturedRequest{path: r.URL.Path, body: payload, rawBody: raw}
+			captured <- capturedRequest{path: r.URL.Path, rawQuery: r.URL.RawQuery, body: payload, rawBody: raw}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(anthropicMessageResponse(t, []map[string]any{{"type": "text", "text": "ok"}}, 1, 1)))
 		default:
