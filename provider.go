@@ -183,7 +183,7 @@ func (r *Provider) PutFile(ctx context.Context, file contractsai.StorableFile) (
 		return nil, err
 	}
 
-	upload, err := r.client.Beta.Files.Upload(ctx, goanthropic.BetaFileUploadParams{
+	upload, err := r.client.Files.Upload(ctx, goanthropic.FileUploadParams{
 		File: goanthropic.File(bytes.NewReader(content), r.uploadFilename(file), file.MimeType()),
 	})
 	if err != nil {
@@ -194,12 +194,12 @@ func (r *Provider) PutFile(ctx context.Context, file contractsai.StorableFile) (
 }
 
 func (r *Provider) GetFile(ctx context.Context, id string) (contractsai.FileResponse, error) {
-	metadata, err := r.client.Beta.Files.GetMetadata(ctx, id, goanthropic.BetaFileGetMetadataParams{})
+	metadata, err := r.client.Files.GetMetadata(ctx, id, goanthropic.FileGetMetadataParams{})
 	if err != nil {
 		return nil, r.failoverError(err)
 	}
 
-	response, err := r.client.Beta.Files.Download(ctx, id, goanthropic.BetaFileDownloadParams{})
+	response, err := r.client.Files.Download(ctx, id, goanthropic.FileDownloadParams{})
 	if err != nil {
 		return nil, r.failoverError(err)
 	}
@@ -219,7 +219,7 @@ func (r *Provider) GetFile(ctx context.Context, id string) (contractsai.FileResp
 }
 
 func (r *Provider) DeleteFile(ctx context.Context, id string) error {
-	_, err := r.client.Beta.Files.Delete(ctx, id, goanthropic.BetaFileDeleteParams{})
+	_, err := r.client.Files.Delete(ctx, id, goanthropic.FileDeleteParams{})
 	if err != nil {
 		return r.failoverError(err)
 	}
