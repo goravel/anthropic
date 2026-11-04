@@ -47,7 +47,7 @@ Configure `failover` rules to add Anthropic-specific error message mappings. Pla
 - Streaming responses
 - Tool calling
 - Prompt attachments
-- Provider-managed files via Anthropic's beta files API
+- Provider-managed files via Anthropic's Files API
 
 ## Not supported
 

@@ -25,6 +25,7 @@ import (
 
 type capturedRequest struct {
 	path        string
+	rawQuery    string
 	apiKey      string
 	version     string
 	beta        string
@@ -441,7 +442,7 @@ func TestProviderStream(t *testing.T) {
 }
 
 func TestProviderFileLifecycle(t *testing.T) {
-	t.Run("put file uploads to beta files api", func(t *testing.T) {
+	t.Run("put file uploads to files api", func(t *testing.T) {
 		captured := make(chan capturedRequest, 1)
 		server := newUploadServer(t, `{"id":"file_123","created_at":"2026-01-01T00:00:00Z","filename":"report.txt","mime_type":"text/plain","size_bytes":6,"type":"file","downloadable":true,"scope":null}`, captured)
 		defer server.Close()
@@ -453,7 +454,8 @@ func TestProviderFileLifecycle(t *testing.T) {
 
 		req := <-captured
 		assert.Equal(t, "/v1/files", req.path)
-		assert.Contains(t, req.beta, "files-api-2025-04-14")
+		assert.Empty(t, req.rawQuery)
+		assert.Empty(t, req.beta)
 		assert.Contains(t, req.contentType, "multipart/form-data")
 		filename, mimeType, body := parseMultipartFile(t, req.contentType, req.rawBody)
 		assert.Equal(t, "report.txt", filename)
@@ -473,9 +475,18 @@ func TestProviderFileLifecycle(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []byte("report"), content)
 		assert.Equal(t, "text/plain", file.MimeType())
+
+		requests := drainCapturedRequests(captured)
+		require.Len(t, requests, 2)
+		assert.Equal(t, "/v1/files/file_123", requests[0].path)
+		assert.Equal(t, "/v1/files/file_123/content", requests[1].path)
+		assert.Empty(t, requests[0].rawQuery)
+		assert.Empty(t, requests[0].beta)
+		assert.Empty(t, requests[1].rawQuery)
+		assert.Empty(t, requests[1].beta)
 	})
 
-	t.Run("delete file uses beta files api", func(t *testing.T) {
+	t.Run("delete file uses files api", func(t *testing.T) {
 		captured := make(chan capturedRequest, 1)
 		server := newDeleteServer(t, captured)
 		defer server.Close()
@@ -485,6 +496,8 @@ func TestProviderFileLifecycle(t *testing.T) {
 
 		req := <-captured
 		assert.Equal(t, "/v1/files/file_123", req.path)
+		assert.Empty(t, req.rawQuery)
+		assert.Empty(t, req.beta)
 	})
 }
 
@@ -519,7 +532,7 @@ func newMessageServer(t *testing.T, status int, body string, captured chan<- cap
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		defer func() { _ = r.Body.Close() }()
 		payload, raw := decodeBodyMap(t, r)
-		captured <- capturedRequest{path: r.URL.Path, apiKey: r.Header.Get("X-Api-Key"), version: r.Header.Get("anthropic-version"), body: payload, contentType: r.Header.Get("Content-Type"), rawBody: raw}
+		captured <- capturedRequest{path: r.URL.Path, rawQuery: r.URL.RawQuery, apiKey: r.Header.Get("X-Api-Key"), version: r.Header.Get("anthropic-version"), body: payload, contentType: r.Header.Get("Content-Type"), rawBody: raw}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
@@ -532,7 +545,7 @@ func newStreamingMessageServer(t *testing.T, body string, captured chan<- captur
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		defer func() { _ = r.Body.Close() }()
 		payload, raw := decodeBodyMap(t, r)
-		captured <- capturedRequest{path: r.URL.Path, apiKey: r.Header.Get("X-Api-Key"), version: r.Header.Get("anthropic-version"), body: payload, contentType: r.Header.Get("Content-Type"), rawBody: raw}
+		captured <- capturedRequest{path: r.URL.Path, rawQuery: r.URL.RawQuery, apiKey: r.Header.Get("X-Api-Key"), version: r.Header.Get("anthropic-version"), body: payload, contentType: r.Header.Get("Content-Type"), rawBody: raw}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(body))
@@ -546,7 +559,7 @@ func newUploadServer(t *testing.T, body string, captured chan<- capturedRequest)
 		defer func() { _ = r.Body.Close() }()
 		raw, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
-		captured <- capturedRequest{path: r.URL.Path, apiKey: r.Header.Get("X-Api-Key"), version: r.Header.Get("anthropic-version"), beta: r.Header.Get("anthropic-beta"), contentType: r.Header.Get("Content-Type"), rawBody: raw}
+		captured <- capturedRequest{path: r.URL.Path, rawQuery: r.URL.RawQuery, apiKey: r.Header.Get("X-Api-Key"), version: r.Header.Get("anthropic-version"), beta: r.Header.Get("anthropic-beta"), contentType: r.Header.Get("Content-Type"), rawBody: raw}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(body))
@@ -559,11 +572,11 @@ func newFileServer(t *testing.T, captured chan<- capturedRequest) *httptest.Serv
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/files/file_123":
-			captured <- capturedRequest{path: r.URL.Path, beta: r.Header.Get("anthropic-beta")}
+			captured <- capturedRequest{path: r.URL.Path, rawQuery: r.URL.RawQuery, beta: r.Header.Get("anthropic-beta")}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":"file_123","created_at":"2026-01-01T00:00:00Z","filename":"report.txt","mime_type":"text/plain","size_bytes":6,"type":"file","downloadable":true,"scope":null}`))
 		case "/v1/files/file_123/content":
-			captured <- capturedRequest{path: r.URL.Path, beta: r.Header.Get("anthropic-beta")}
+			captured <- capturedRequest{path: r.URL.Path, rawQuery: r.URL.RawQuery, beta: r.Header.Get("anthropic-beta")}
 			w.Header().Set("Content-Type", "application/binary")
 			_, _ = w.Write([]byte("report"))
 		default:
@@ -576,7 +589,7 @@ func newFileServer(t *testing.T, captured chan<- capturedRequest) *httptest.Serv
 func newDeleteServer(t *testing.T, captured chan<- capturedRequest) *httptest.Server {
 	t.Helper()
 	handler := func(w http.ResponseWriter, r *http.Request) {
-		captured <- capturedRequest{path: r.URL.Path, beta: r.Header.Get("anthropic-beta")}
+		captured <- capturedRequest{path: r.URL.Path, rawQuery: r.URL.RawQuery, beta: r.Header.Get("anthropic-beta")}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"file_123","type":"file_deleted"}`))
 	}
@@ -588,16 +601,16 @@ func newStoredAttachmentServer(t *testing.T, captured chan<- capturedRequest) *h
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/files/file_123":
-			captured <- capturedRequest{path: r.URL.Path}
+			captured <- capturedRequest{path: r.URL.Path, rawQuery: r.URL.RawQuery}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":"file_123","created_at":"2026-01-01T00:00:00Z","filename":"report.txt","mime_type":"text/plain","size_bytes":6,"type":"file","downloadable":true,"scope":null}`))
 		case "/v1/files/file_123/content":
-			captured <- capturedRequest{path: r.URL.Path}
+			captured <- capturedRequest{path: r.URL.Path, rawQuery: r.URL.RawQuery}
 			w.Header().Set("Content-Type", "application/binary")
 			_, _ = w.Write([]byte("report"))
 		case "/v1/messages":
 			payload, raw := decodeBodyMap(t, r)
-			captured <- capturedRequest{path: r.URL.Path, body: payload, rawBody: raw}
+			captured <- capturedRequest{path: r.URL.Path, rawQuery: r.URL.RawQuery, body: payload, rawBody: raw}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(anthropicMessageResponse(t, []map[string]any{{"type": "text", "text": "ok"}}, 1, 1)))
 		default:
