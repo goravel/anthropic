@@ -2,7 +2,7 @@ module github.com/goravel/anthropic
 
 go 1.25.0
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.84.0
