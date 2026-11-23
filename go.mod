@@ -6,6 +6,7 @@ toolchain go1.27.4
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.84.0
+	github.com/anthropics/anthropic-sdk-go/v2 v2.13.0
 	github.com/goravel/framework v1.18.1
 	github.com/stretchr/testify v1.12.1
 )
